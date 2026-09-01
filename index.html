@@ -1,0 +1,188 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<title>リモコン</title>
+<script src="https://cdn.jsdelivr.net/npm/peerjs@1/dist/peerjs.min.js"></script>
+<style>
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  html, body {
+    margin: 0;
+    height: 100%;
+    background: #05070a;
+    color: #baffe0;
+    font-family: "Share Tech Mono", monospace, sans-serif;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+  .wrap {
+    width: 100%;
+    max-width: 420px;
+    padding: 24px;
+    text-align: center;
+  }
+  h1 {
+    font-size: 16px;
+    letter-spacing: 2px;
+    color: #6fd6ab;
+    margin: 0 0 18px;
+    font-weight: normal;
+  }
+  .status {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 13px;
+    color: #ff9a4d;
+    margin-bottom: 22px;
+  }
+  .dot {
+    width: 9px;
+    height: 9px;
+    border-radius: 50%;
+    background: #ff5a5a;
+    box-shadow: 0 0 8px #ff5a5a;
+  }
+  .status.ok .dot { background: #4dffb0; box-shadow: 0 0 8px #4dffb0; }
+  .status.ok { color: #4dffb0; }
+
+  .idbox {
+    display: flex;
+    gap: 8px;
+    margin-bottom: 14px;
+  }
+  .idbox input {
+    flex: 1;
+    background: #0a1e16;
+    border: 1px solid #245c43;
+    color: #baffe0;
+    font-family: inherit;
+    font-size: 16px;
+    padding: 12px;
+    border-radius: 6px;
+    text-align: center;
+    letter-spacing: 2px;
+    outline: none;
+  }
+  .idbox button, .connect-btn {
+    background: #143d2b;
+    border: 1px solid #4dffb0;
+    color: #baffe0;
+    font-family: inherit;
+    font-size: 14px;
+    padding: 12px 16px;
+    border-radius: 6px;
+    cursor: pointer;
+  }
+
+  .flash-btn {
+    width: 100%;
+    aspect-ratio: 1 / 1;
+    max-height: 60vh;
+    border-radius: 50%;
+    background: radial-gradient(circle at 40% 35%, #1b4a34, #06120c 75%);
+    border: 3px solid #245c43;
+    color: #4dffb0;
+    font-family: "VT323", monospace, sans-serif;
+    font-size: 28px;
+    letter-spacing: 4px;
+    cursor: pointer;
+    user-select: none;
+    box-shadow: 0 0 30px rgba(77,255,176,0.15);
+    transition: transform 0.08s, box-shadow 0.15s, opacity 0.3s;
+    opacity: 0.4;
+    pointer-events: none;
+  }
+  .flash-btn.ready {
+    opacity: 1;
+    pointer-events: auto;
+    box-shadow: 0 0 40px rgba(77,255,176,0.4);
+  }
+  .flash-btn:active {
+    transform: scale(0.96);
+    box-shadow: 0 0 55px rgba(77,255,176,0.75);
+  }
+
+  .hint { margin-top: 18px; font-size: 12px; color: #2fa876; line-height: 1.6; }
+  .setup { margin-top: 20px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>&gt; REMOTE CONTROL LINK</h1>
+  <div class="status" id="status"><span class="dot"></span><span id="statusText">未接続</span></div>
+
+  <button class="flash-btn" id="flashBtn">FLASH</button>
+
+  <div class="setup" id="setup">
+    <div class="idbox">
+      <input id="idInput" type="text" placeholder="接続コードを入力 (例: tdc-1234)">
+      <button id="connectBtn">接続</button>
+    </div>
+  </div>
+
+  <div class="hint">本体側の画面に表示されたQRコードを読み取るか、<br>接続コードを入力して「接続」を押してください。</div>
+</div>
+
+<script>
+  const statusEl = document.getElementById("status");
+  const statusText = document.getElementById("statusText");
+  const flashBtn = document.getElementById("flashBtn");
+  const idInput = document.getElementById("idInput");
+  const connectBtn = document.getElementById("connectBtn");
+  const setup = document.getElementById("setup");
+
+  let conn = null;
+  let peer = null;
+
+  function setStatus(ok, text) {
+    statusText.textContent = text;
+    statusEl.classList.toggle("ok", ok);
+    flashBtn.classList.toggle("ready", ok);
+  }
+
+  function connectTo(targetId) {
+    if (!targetId) return;
+    setStatus(false, "接続中...");
+    peer = new Peer();
+    peer.on("open", () => {
+      conn = peer.connect(targetId, { reliable: true });
+      conn.on("open", () => {
+        setStatus(true, "接続完了: " + targetId);
+        setup.style.display = "none";
+      });
+      conn.on("close", () => setStatus(false, "切断されました"));
+      conn.on("error", () => setStatus(false, "接続エラー"));
+    });
+    peer.on("error", (err) => {
+      setStatus(false, "エラー: " + err.type);
+    });
+  }
+
+  connectBtn.addEventListener("click", () => {
+    connectTo(idInput.value.trim());
+  });
+  idInput.addEventListener("keydown", (e) => {
+    if (e.key === "Enter") connectTo(idInput.value.trim());
+  });
+
+  flashBtn.addEventListener("click", () => {
+    if (conn && conn.open) {
+      conn.send("flash");
+      flashBtn.style.transform = "scale(0.9)";
+      setTimeout(() => { flashBtn.style.transform = ""; }, 150);
+    }
+  });
+
+  // URLに ?id=xxxx が付いていれば自動接続(QR読み取り経由を想定)
+  const params = new URLSearchParams(location.search);
+  const autoId = params.get("id");
+  if (autoId) {
+    idInput.value = autoId;
+    connectTo(autoId);
+  }
+</script>
+</body>
+</html>

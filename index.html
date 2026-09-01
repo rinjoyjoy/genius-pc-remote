@@ -137,6 +137,14 @@
   let conn = null;
   let peer = null;
 
+  // STUNだけでは越えられないNAT/AP分離環境でも繋がるよう、公開TURN中継(Metered Open Relay)を併用する
+  const ICE_SERVERS = [
+    { urls: "stun:stun.relay.metered.ca:80" },
+    { urls: "turn:global.relay.metered.ca:80", username: "openrelayproject", credential: "openrelayproject" },
+    { urls: "turn:global.relay.metered.ca:443", username: "openrelayproject", credential: "openrelayproject" },
+    { urls: "turn:global.relay.metered.ca:443?transport=tcp", username: "openrelayproject", credential: "openrelayproject" },
+  ];
+
   function setStatus(ok, text) {
     statusText.textContent = text;
     statusEl.classList.toggle("ok", ok);
@@ -146,7 +154,7 @@
   function connectTo(targetId) {
     if (!targetId) return;
     setStatus(false, "接続中...");
-    peer = new Peer();
+    peer = new Peer(undefined, { config: { iceServers: ICE_SERVERS } });
     peer.on("open", () => {
       conn = peer.connect(targetId, { reliable: true });
       conn.on("open", () => {
@@ -154,7 +162,7 @@
         setup.style.display = "none";
       });
       conn.on("close", () => setStatus(false, "切断されました"));
-      conn.on("error", () => setStatus(false, "接続エラー"));
+      conn.on("error", (err) => setStatus(false, "接続エラー: " + (err && err.type ? err.type : "unknown")));
     });
     peer.on("error", (err) => {
       setStatus(false, "エラー: " + err.type);

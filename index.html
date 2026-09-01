@@ -4,7 +4,6 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
 <title>リモコン</title>
-<script src="https://cdn.jsdelivr.net/npm/peerjs@1/dist/peerjs.min.js"></script>
 <style>
   * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
   html, body {
@@ -48,35 +47,6 @@
   .status.ok .dot { background: #4dffb0; box-shadow: 0 0 8px #4dffb0; }
   .status.ok { color: #4dffb0; }
 
-  .idbox {
-    display: flex;
-    gap: 8px;
-    margin-bottom: 14px;
-  }
-  .idbox input {
-    flex: 1;
-    background: #0a1e16;
-    border: 1px solid #245c43;
-    color: #baffe0;
-    font-family: inherit;
-    font-size: 16px;
-    padding: 12px;
-    border-radius: 6px;
-    text-align: center;
-    letter-spacing: 2px;
-    outline: none;
-  }
-  .idbox button, .connect-btn {
-    background: #143d2b;
-    border: 1px solid #4dffb0;
-    color: #baffe0;
-    font-family: inherit;
-    font-size: 14px;
-    padding: 12px 16px;
-    border-radius: 6px;
-    cursor: pointer;
-  }
-
   .flash-btn {
     width: 100%;
     aspect-ratio: 1 / 1;
@@ -92,21 +62,14 @@
     user-select: none;
     box-shadow: 0 0 30px rgba(77,255,176,0.15);
     transition: transform 0.08s, box-shadow 0.15s, opacity 0.3s;
-    opacity: 0.4;
-    pointer-events: none;
-  }
-  .flash-btn.ready {
-    opacity: 1;
-    pointer-events: auto;
-    box-shadow: 0 0 40px rgba(77,255,176,0.4);
   }
   .flash-btn:active {
     transform: scale(0.96);
     box-shadow: 0 0 55px rgba(77,255,176,0.75);
   }
+  .flash-btn.sending { opacity: 0.5; }
 
   .hint { margin-top: 18px; font-size: 12px; color: #2fa876; line-height: 1.6; }
-  .setup { margin-top: 20px; }
   .debug {
     display: none;
     margin-top: 16px;
@@ -125,122 +88,64 @@
 <body>
 <div class="wrap">
   <h1>&gt; REMOTE CONTROL LINK</h1>
-  <div class="status" id="status"><span class="dot"></span><span id="statusText">未接続</span></div>
+  <div class="status" id="status"><span class="dot"></span><span id="statusText">接続確認中...</span></div>
 
   <button class="flash-btn" id="flashBtn">FLASH</button>
 
-  <div class="setup" id="setup">
-    <div class="idbox">
-      <input id="idInput" type="text" placeholder="接続コードを入力 (例: tdc-1234)">
-      <button id="connectBtn">接続</button>
-    </div>
-  </div>
-
-  <div class="hint">本体側の画面に表示されたQRコードを読み取るか、<br>接続コードを入力して「接続」を押してください。</div>
+  <div class="hint">画面がスリープしていると通信できないことがあります。<br>ボタンを押して本体画面を一瞬点灯させます。</div>
   <div class="debug" id="debugBox"></div>
 </div>
 
 <script>
+  /* ============================================================
+     CONFIG - Google Apps Script (スプレッドシート連携)のWebアプリURLを設定する
+     genius-pc-screen 側の index.html と同じURLを設定すること
+     ============================================================ */
+  const BACKEND_URL = "https://script.google.com/macros/s/xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx/exec";
+
   const statusEl = document.getElementById("status");
   const statusText = document.getElementById("statusText");
   const flashBtn = document.getElementById("flashBtn");
-  const idInput = document.getElementById("idInput");
-  const connectBtn = document.getElementById("connectBtn");
   const debugBox = document.getElementById("debugBox");
-  const setup = document.getElementById("setup");
-
-  let conn = null;
-  let peer = null;
-  let connecting = false;
-
-  // STUNだけでは越えられないNAT/AP分離環境でも繋がるよう、公開TURN中継(Metered Open Relay)を併用する
-  const ICE_SERVERS = [
-    { urls: "stun:stun.relay.metered.ca:80" },
-    { urls: "turn:global.relay.metered.ca:80", username: "openrelayproject", credential: "openrelayproject" },
-    { urls: "turn:global.relay.metered.ca:443", username: "openrelayproject", credential: "openrelayproject" },
-    { urls: "turn:global.relay.metered.ca:443?transport=tcp", username: "openrelayproject", credential: "openrelayproject" },
-  ];
 
   function setStatus(ok, text) {
     statusText.textContent = text;
     statusEl.classList.toggle("ok", ok);
-    flashBtn.classList.toggle("ready", ok);
   }
 
-  function connectTo(targetId) {
-    // ボタン連打やQR自動接続との重複実行を防ぐ(重複すると後発の失敗した接続で
-    // 画面表示・送信先が上書きされ、先に繋がっていた接続が見えなくなる)
-    if (!targetId || connecting) return;
-    connecting = true;
-    connectBtn.disabled = true;
-    if (peer) { try { peer.destroy(); } catch (e) {} }
-
-    setStatus(false, "接続中...");
-    peer = new Peer(undefined, { config: { iceServers: ICE_SERVERS } });
-    peer.on("open", () => {
-      conn = peer.connect(targetId, { reliable: true });
-      conn.on("open", () => {
-        connecting = false;
-        connectBtn.disabled = false;
-        setStatus(true, "接続完了: " + targetId);
-        setup.style.display = "none";
-      });
-      conn.on("close", () => {
-        connecting = false;
-        connectBtn.disabled = false;
-        setStatus(false, "切断されました");
-      });
-      conn.on("error", (err) => {
-        connecting = false;
-        connectBtn.disabled = false;
-        setStatus(false, "接続エラー");
-        showDebug("conn error: " + describeErr(err));
-      });
-    });
-    peer.on("error", (err) => {
-      connecting = false;
-      connectBtn.disabled = false;
-      setStatus(false, "エラー");
-      showDebug("peer error: " + describeErr(err));
-    });
-  }
-
-  function describeErr(err) {
-    if (!err) return "(no error object)";
-    const parts = [];
-    if (err.type) parts.push("type=" + err.type);
-    if (err.message) parts.push("message=" + err.message);
-    if (!parts.length) parts.push(String(err));
-    return parts.join(", ");
-  }
   function showDebug(text) {
     console.error(text);
     debugBox.textContent = text;
     debugBox.style.display = "block";
   }
 
-  connectBtn.addEventListener("click", () => {
-    connectTo(idInput.value.trim());
-  });
-  idInput.addEventListener("keydown", (e) => {
-    if (e.key === "Enter") connectTo(idInput.value.trim());
-  });
+  async function checkBackend() {
+    try {
+      const res = await fetch(BACKEND_URL + "?action=ping", { cache: "no-store" });
+      if (!res.ok) throw new Error("HTTP " + res.status);
+      await res.json();
+      setStatus(true, "接続OK");
+    } catch (err) {
+      setStatus(false, "接続エラー");
+      showDebug("ping error: " + (err && err.message ? err.message : String(err)));
+    }
+  }
+  checkBackend();
 
-  flashBtn.addEventListener("click", () => {
-    if (conn && conn.open) {
-      conn.send("flash");
-      flashBtn.style.transform = "scale(0.9)";
-      setTimeout(() => { flashBtn.style.transform = ""; }, 150);
+  flashBtn.addEventListener("click", async () => {
+    flashBtn.classList.add("sending");
+    try {
+      const res = await fetch(BACKEND_URL + "?action=flash", { cache: "no-store" });
+      if (!res.ok) throw new Error("HTTP " + res.status);
+      await res.json();
+      setStatus(true, "送信しました");
+    } catch (err) {
+      setStatus(false, "送信エラー");
+      showDebug("flash error: " + (err && err.message ? err.message : String(err)));
+    } finally {
+      setTimeout(() => flashBtn.classList.remove("sending"), 200);
     }
   });
-
-  // URLに ?id=xxxx が付いていれば自動接続(QR読み取り経由を想定)
-  const params = new URLSearchParams(location.search);
-  const autoId = params.get("id");
-  if (autoId) {
-    idInput.value = autoId;
-    connectTo(autoId);
-  }
 </script>
 </body>
 </html>

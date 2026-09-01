@@ -136,6 +136,7 @@
 
   let conn = null;
   let peer = null;
+  let connecting = false;
 
   // STUNだけでは越えられないNAT/AP分離環境でも繋がるよう、公開TURN中継(Metered Open Relay)を併用する
   const ICE_SERVERS = [
@@ -152,20 +153,38 @@
   }
 
   function connectTo(targetId) {
-    if (!targetId) return;
+    // ボタン連打やQR自動接続との重複実行を防ぐ(重複すると後発の失敗した接続で
+    // 画面表示・送信先が上書きされ、先に繋がっていた接続が見えなくなる)
+    if (!targetId || connecting) return;
+    connecting = true;
+    connectBtn.disabled = true;
+    if (peer) { try { peer.destroy(); } catch (e) {} }
+
     setStatus(false, "接続中...");
     peer = new Peer(undefined, { config: { iceServers: ICE_SERVERS } });
     peer.on("open", () => {
       conn = peer.connect(targetId, { reliable: true });
       conn.on("open", () => {
+        connecting = false;
+        connectBtn.disabled = false;
         setStatus(true, "接続完了: " + targetId);
         setup.style.display = "none";
       });
-      conn.on("close", () => setStatus(false, "切断されました"));
-      conn.on("error", (err) => setStatus(false, "接続エラー: " + (err && err.type ? err.type : "unknown")));
+      conn.on("close", () => {
+        connecting = false;
+        connectBtn.disabled = false;
+        setStatus(false, "切断されました");
+      });
+      conn.on("error", (err) => {
+        connecting = false;
+        connectBtn.disabled = false;
+        setStatus(false, "接続エラー: " + (err && err.type ? err.type : "unknown"));
+      });
     });
     peer.on("error", (err) => {
-      setStatus(false, "エラー: " + err.type);
+      connecting = false;
+      connectBtn.disabled = false;
+      setStatus(false, "エラー: " + (err && err.type ? err.type : "unknown"));
     });
   }
 
